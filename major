@@ -1,0 +1,78 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime, timedelta
+
+# 1. SYNTHETIC DATA GENERATOR
+def generate_intraday_data(minutes=390):  # Standard US Market Session
+    np.random.seed(42)
+    times = [datetime(2023, 1, 1, 9, 30) + timedelta(minutes=i) for i in range(minutes)]
+    
+    # Simulate price using Geometric Brownian Motion with volatility clusters
+    returns = np.random.normal(0, 0.001, minutes)
+    # Add a "volatility spike" in the middle of the day
+    returns[150:200] = np.random.normal(0, 0.005, 50) 
+    
+    price = 100 * np.exp(np.cumsum(returns))
+    volume = np.random.poisson(1000, minutes) + (np.abs(returns) * 500000)
+    
+    return pd.DataFrame({'Timestamp': times, 'Price': price, 'Volume': volume}).set_index('Timestamp')
+
+# 2. ANALYSIS ENGINE
+def analyze_microstructure(df):
+    # Log Returns
+    df['Returns'] = np.log(df['Price'] / df['Price'].shift(1))
+    
+    # Volatility Clustering (Rolling Std Dev using NumPy)
+    df['Rolling_Vol'] = df['Returns'].rolling(window=20).std()
+    
+    # Moving Average Crossover (Fast=9, Slow=21)
+    df['SMA_Fast'] = df['Price'].rolling(window=9).mean()
+    df['SMA_Slow'] = df['Price'].rolling(window=21).mean()
+    
+    # Drawdown Calculation
+    rolling_max = df['Price'].cummax()
+    df['Drawdown'] = (df['Price'] - rolling_max) / rolling_max
+    
+    return df
+
+# 3. VISUALIZATION DASHBOARD
+def plot_dashboard(df):
+    fig, axes = plt.subplots(3, 2, figsize=(15, 12))
+    plt.subplots_adjust(hspace=0.4)
+
+    # Price & Moving Averages
+    axes[0, 0].plot(df['Price'], label='Price', alpha=0.8)
+    axes[0, 0].plot(df['SMA_Fast'], label='9-min SMA', linestyle='--')
+    axes[0, 0].plot(df['SMA_Slow'], label='21-min SMA', linestyle='--')
+    axes[0, 0].set_title("Price & MA Crossover Impact")
+    axes[0, 0].legend()
+
+    # Rolling Volatility (Clustering)
+    axes[0, 1].plot(df['Rolling_Vol'], color='orange')
+    axes[0, 1].set_title("Volatility Clustering (Rolling 20-min Std)")
+
+    # Volume Spikes
+    axes[1, 0].bar(df.index, df['Volume'], color='gray', alpha=0.5)
+    axes[1, 0].set_title("Volume Profile")
+
+    # Price-Volume Relationship (Correlation)
+    sns.regplot(x=df['Volume'], y=df['Returns'].abs(), ax=axes[1, 1], scatter_kws={'alpha':0.3})
+    axes[1, 1].set_title("Price Magnitude vs. Volume Correlation")
+
+    # Return Distribution (Fat Tails)
+    sns.histplot(df['Returns'].dropna(), kde=True, ax=axes[2, 0], color='purple')
+    axes[2, 0].set_title(f"Return Distribution (Kurtosis: {df['Returns'].kurt():.2f})")
+
+    # Drawdown & Recovery
+    axes[2, 1].fill_between(df.index, df['Drawdown'], color='red', alpha=0.3)
+    axes[2, 1].set_title("Intraday Drawdown (Peak-to-Trough)")
+
+    plt.show()
+
+# EXECUTION
+if __name__ == "__main__":
+    raw_data = generate_intraday_data()
+    analyzed_data = analyze_microstructure(raw_data)
+    plot_dashboard(analyzed_data)
